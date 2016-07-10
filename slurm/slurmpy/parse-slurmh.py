@@ -69,16 +69,16 @@ def parseCodeGetDecls(code):
 	return filter(lambda z: z["isInMainFile"], allDecls)
 
 def findTypedefForStruct(typedefDecls, structDecl):
-	alias = None
+	aliasList = []
 
 	if "addressTypedefForAnonDecl" in structDecl.keys():
-		alias = next(u for u in typedefDecls if u["address"] == structDecl["addressTypedefForAnonDecl"])
-	else:
-		tmp = [u for u in typedefDecls if u["underlyingType"] == "struct %s" % structDecl["name"]]
-		if 1 == len(tmp):
-			alias = tmp[0]
+		aliasList += [next(u for u in typedefDecls if u["address"] == structDecl["addressTypedefForAnonDecl"])]
 
-	return alias
+	for x in [u for u in typedefDecls if u["underlyingType"] == "struct %s" % structDecl["name"]]:
+		if not x["name"] in [v["name"] for v in aliasList]:
+			aliasList += [x]
+
+	return aliasList
 
 def extractStructs(allDecls):
 	structDecls  = filter(lambda z:  "RecordDecl" == z["class"], allDecls)
@@ -86,13 +86,13 @@ def extractStructs(allDecls):
 
 	structList = []
 	for structDecl in structDecls:
-		d = {"name": structDecl["name"], "members": structDecl["fields"]}
+		aliasList = findTypedefForStruct(typedefDecls, structDecl)
 
-		alias = findTypedefForStruct(typedefDecls, structDecl)
-		if alias:
-			d["typedef"] = alias["name"]
-
-		structList += [d]
+		if 0 == len(aliasList):
+			structList += [{"name": structDecl["name"], "members": structDecl["fields"]}]
+		else:
+			for alias in aliasList:
+				structList += [{"name": structDecl["name"], "members": structDecl["fields"], "typedef": alias["name"]}]
 
 	return structList
 

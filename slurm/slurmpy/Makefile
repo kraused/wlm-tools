@@ -38,7 +38,7 @@ slurmpy-enums.c : slurmpy.c
 	$(CC) $(CPPFLAGS) $(CCFLAGS) -o $@ -c $<
 
 slurmpy.so: slurmpy.o slurmpy-macros.o slurmpy-enums.o
-	$(CC) $(CPPFLAGS) $(CCFLAGS) -o $@ $< -shared $(LDFLAGS) $(LIBS)
+	$(CC) $(CPPFLAGS) $(CCFLAGS) -o $@ $^ -shared $(LDFLAGS) $(LIBS)
 
 clean:
 	/bin/rm api.json
