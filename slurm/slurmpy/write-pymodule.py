@@ -3,17 +3,23 @@ import sys
 import os
 import re
 import json
+import StringIO
 
 
 api = json.loads(open(sys.argv[1], "r").read())
 
-f = open(sys.argv[2], "w")
+# Use StringIO here instead of a real file so that the output file is only
+# created at the very end when everything went fine. That makes sure that
+# make will be able re-run rules in case something went wrong.
+f = StringIO.StringIO()
 
 f.write("""
 #include <python2.7/Python.h>
 #include <python2.7/structmember.h>
 
+#include <slurm/slurm_errno.h>
 #include <slurm/slurm.h>
+#include <slurm/slurmdb.h>
 
 void slurm_verbose(const char *fmt, ...)
 {
@@ -38,7 +44,7 @@ def findStructRecordFromPtrType(tp):
 	tp = re.sub(r'\s', r'', tp)
 
 	for d in api["structs"]:
-		if d["typedef"] == tp[:-1]:
+		if "typedef" in d.keys() and d["typedef"] == tp[:-1]:
 			return d
 
 	return None
@@ -535,9 +541,11 @@ static PyObject *convert_list_to_%s_PyWrap(PyObject *obj, PyObject *args)
 	allWrapFunctions += [("convert_list_to_%s_PTR" % name, "convert_list_to_%s_PTR_PyWrap" % name, "Convert a list to a %s_PTR instance" % name)]
 
 for d in api["structs"]:
-	assert(len(d["typedef"]) > 0)	# We use the typedef rather than the name since
-					# the current slurm.h contains at least one anonymous
-					# structure.
+	if not "typedef" in d.keys():
+		sys.stderr.write("Skipping %s (no typedef).\n" % str(d))	# We use the typedef rather than the name since
+										# the current slurm.h contains at least one anonymous
+										# structure.
+		continue
 
 	if 1:
 		T = PythonType("%s_PTR" % d["typedef"])
@@ -886,7 +894,11 @@ for T in allWrapTypes:
 
 f.write(additionalFunctions)
 
-functionBlacklist = [re.compile(r'slurm_list_.*', 0), re.compile(r'slurm_hostlist_.*', 0), re.compile(r'slurm_update_block', 0), re.compile(r'slurm_allocation_msg_thr_create', 0), re.compile(r'slurm_allocation_msg_thr_destroy', 0), re.compile(r'slurm_step_ctx_create', 0), re.compile(r'slurm_step_ctx_get', 0), re.compile(r'slurm_jobinfo_ctx_get', 0), re.compile(r'slurm_step_ctx_daemon_per_node_hack', 0), re.compile(r'slurm_step_ctx_destroy', 0), re.compile(r'slurm_step_launch', 0), re.compile(r'slurm_step_launch_add', 0), re.compile(r'slurm_step_launch_wait_start', 0), re.compile(r'slurm_step_launch_wait_finish', 0), re.compile(r'slurm_step_launch_abort', 0), re.compile(r'slurm_step_launch_fwd_signal', 0), re.compile(r'slurm_step_launch_fwd_wake', 0), re.compile(r'slurm_job_cpus_allocated_on_node_id', 0), re.compile(r'slurm_job_cpus_allocated_on_node', 0), re.compile(r'slurm_get_end_time', 0), re.compile(r'slurm_pid2jobid', 0), re.compile(r'slurm_job_step_pids_response_msg_free', 0), re.compile(r'slurm_get_select_jobinfo', 0), re.compile(r'slurm_get_select_nodeinfo', 0), re.compile(r'slurm_init_part_desc_msg', 0), re.compile(r'slurm_create_partition', 0), re.compile(r'slurm_update_partition', 0), re.compile(r'slurm_checkpoint_able', 0), re.compile(r'slurm_checkpoint_error', 0)]
+functionBlacklist = [re.compile(r'slurm_list_.*', 0), re.compile(r'slurm_hostlist_.*', 0), re.compile(r'slurm_update_block', 0), re.compile(r'slurm_allocation_msg_thr_create', 0), re.compile(r'slurm_allocation_msg_thr_destroy', 0), re.compile(r'slurm_step_ctx_create', 0), re.compile(r'slurm_step_ctx_get', 0), re.compile(r'slurm_jobinfo_ctx_get', 0), re.compile(r'slurm_step_ctx_daemon_per_node_hack', 0), re.compile(r'slurm_step_ctx_destroy', 0), re.compile(r'slurm_step_launch', 0), re.compile(r'slurm_step_launch_add', 0), re.compile(r'slurm_step_launch_wait_start', 0), re.compile(r'slurm_step_launch_wait_finish', 0), re.compile(r'slurm_step_launch_abort', 0), re.compile(r'slurm_step_launch_fwd_signal', 0), re.compile(r'slurm_step_launch_fwd_wake', 0), re.compile(r'slurm_job_cpus_allocated_on_node_id', 0), re.compile(r'slurm_job_cpus_allocated_on_node', 0), re.compile(r'slurm_get_end_time', 0), re.compile(r'slurm_pid2jobid', 0), re.compile(r'slurm_job_step_pids_response_msg_free', 0), re.compile(r'slurm_get_select_jobinfo', 0), re.compile(r'slurm_get_select_nodeinfo', 0), re.compile(r'slurm_init_part_desc_msg', 0), re.compile(r'slurm_create_partition', 0), re.compile(r'slurm_update_partition', 0), re.compile(r'slurm_checkpoint_able', 0), re.compile(r'slurm_checkpoint_error', 0), re.compile(r'slurm_init_update_block_msg_PyWrap', 0), re.compile(r'slurm_allocate_resources_blocking_PyWrap', 0), re.compile(r'slurm_print_key_pairs_PyWrap', 0), re.compile(r'slurm_get_job_stderr_PyWrap', 0), re.compile(r'slurm_get_job_stdin_PyWrap', 0), re.compile(r'slurm_get_job_stdout_PyWrap', 0), re.compile(r'slurm_job_step_stat_PyWrap', 0), re.compile(r'slurm_job_step_get_pids_PyWrap', 0), re.compile(r'slurm_job_step_stat_response_msg_free_PyWrap', 0)]
+
+functionBlacklist += [re.compile(r'slurm_init_update_block_msg', 0), re.compile(r'slurm_allocate_resources_blocking', 0), re.compile(r'slurm_print_key_pairs', 0), re.compile(r'slurm_get_job_stderr', 0), re.compile(r'slurm_get_job_stdin', 0), re.compile(r'slurm_get_job_stdout', 0), re.compile(r'slurm_job_step_stat', 0), re.compile(r'slurm_job_step_get_pids', 0), re.compile(r'slurm_job_step_stat_response_msg_free', 0), re.compile(r'slurm_print_partition_info', 0), re.compile(r'slurm_sprint_partition_info', 0)]
+
+functionBlacklist += [re.compile(r'slurmdb_accounts_add', 0), re.compile(r'slurmdb_accounts_get', 0), re.compile(r'slurmdb_accounts_modify', 0), re.compile(r'slurmdb_accounts_remove', 0), re.compile(r'slurmdb_archive', 0), re.compile(r'slurmdb_archive_load', 0), re.compile(r'slurmdb_associations_add', 0), re.compile(r'slurmdb_associations_get', 0), re.compile(r'slurmdb_associations_modify', 0), re.compile(r'slurmdb_associations_remove', 0), re.compile(r'slurmdb_clusters_add', 0), re.compile(r'slurmdb_clusters_get', 0), re.compile(r'slurmdb_clusters_modify', 0), re.compile(r'slurmdb_clusters_remove', 0), re.compile(r'slurmdb_report_cluster_account_by_user', 0), re.compile(r'slurmdb_report_cluster_user_by_account', 0), re.compile(r'slurmdb_report_cluster_wckey_by_user', 0), re.compile(r'slurmdb_report_cluster_user_by_wckey', 0), re.compile(r'slurmdb_report_job_sizes_grouped_by_top_account', 0), re.compile(r'slurmdb_report_job_sizes_grouped_by_wckey', 0), re.compile(r'slurmdb_report_job_sizes_grouped_by_top_account_then_wckey', 0), re.compile(r'slurmdb_report_user_top_usage', 0), re.compile(r'slurmdb_coord_add', 0), re.compile(r'slurmdb_coord_remove', 0), re.compile(r'slurmdb_config_get', 0), re.compile(r'slurmdb_events_get', 0), re.compile(r'slurmdb_jobs_get', 0), re.compile(r'slurmdb_problems_get', 0), re.compile(r'slurmdb_reservations_get', 0), re.compile(r'slurmdb_txn_get', 0), re.compile(r'slurmdb_res_add', 0), re.compile(r'slurmdb_res_get', 0), re.compile(r'slurmdb_res_modify', 0), re.compile(r'slurmdb_res_remove', 0), re.compile(r'slurmdb_qos_add', 0), re.compile(r'slurmdb_qos_get', 0), re.compile(r'slurmdb_qos_modify', 0), re.compile(r'slurmdb_qos_remove', 0), re.compile(r'slurmdb_usage_get', 0), re.compile(r'slurmdb_usage_roll', 0), re.compile(r'slurmdb_users_add', 0), re.compile(r'slurmdb_users_get', 0), re.compile(r'slurmdb_users_modify', 0), re.compile(r'slurmdb_users_remove', 0), re.compile(r'slurmdb_wckeys_add', 0), re.compile(r'slurmdb_wckeys_get', 0), re.compile(r'slurmdb_wckeys_modify', 0), re.compile(r'slurmdb_wckeys_remove', 0)]
 
 for d in api["functions"]:
 	skip = False
@@ -1000,6 +1012,9 @@ static PyObject *%s_PyWrap(PyObject *self, PyObject *args)
 			# Try to figure out if we have a free function in the API
 			q = re.sub(r'_t.*', '', a["type"])
 			for z in api["functions"]:
+				if 'void **' == q:
+					continue	# FIXME Temporary workaround
+
 				# Manual fix for a stupid naming mistake in the API.
 				if ("submit_response_msg" == q and "slurm_free_submit_response_response_msg" == z["name"]) or \
 				   re.match(r'.*free_%s.*' % q, z["name"]) or \
@@ -1153,4 +1168,7 @@ f.write("""
 
 f.write("""}
 """)
+
+with open(sys.argv[2], "w") as g:
+	g.write(f.getvalue())
 

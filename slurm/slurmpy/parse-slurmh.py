@@ -3,153 +3,123 @@ import sys
 import os
 import re
 import json
-import hashlib
+import subprocess
 
-# Parse type + name tuples. This function is used to scan function arguments as well
-# as structure members.
-def parseTypeNameList(text, sep):
-	members = []
+import plugin
 
-	for p in re.sub(r'\s', ' ', text).split(sep):
-		if '...' == p.strip():	# variable arguments (funcction parameter)
-			members += [('?', '')]
-		else:
-			lst = [x.strip() for x in list(re.compile(r'([a-zA-Z0-9_\*\[\]]+)').findall(p))]
+def getAdditionalIncludePaths():
+	# Make sure clang finds stdbool and stddef
+	p = subprocess.Popen(["/usr/bin/gcc", "--print-prog-name", "cc1"], stdout = subprocess.PIPE, stderr = subprocess.PIPE)
+	(o, e), x = p.communicate(), p.wait()
 
-			if 0 == len(lst):
-				continue
+	return [re.sub(r'cc1$', r'include', o.strip())]
 
-			# Shift pointers from the name to the type
-			while (len(lst[-1]) > 0) and ('*' == lst[-1][0]):
-				lst[-2] += '*'
-				lst[-1]  = lst[-1][1:]
+def readInCode(fileList):
+	code = ""
+	for F in fileList:
+		code += "\n" + open(F, "r").read() + "\n"
 
-			lst0 = ' '.join(lst[:-1])
-			lst1 = lst[-1]
+	# Remove unnecessary #includes
+	for rx in [r'slurm/.*']:
+		code = re.sub(re.compile(r'#include <%s>' % rx, re.MULTILINE), r'', code)
 
-			if '' == lst0:
-				lst0 = lst1
-				lst1 = ''
-			if 'void' == lst0:
-				continue
+	return code
 
-			members += [(lst0, lst1)]
+def parseCodeGetPpDefs(code):
+	allPpDefs = []
 
-	return members
-
-def getFunctionList(text):
-	fcts = []
-
-	rx = re.compile(r'extern\s?([a-zA-Z0-9_ \*]+?)([a-zA-Z0-9_]+)\s+PARAMS\(\s*\((.*?)\)\s*\)\s*;', re.MULTILINE | re.DOTALL)
-	for f in rx.findall(text):
-		fcts += [(f[0].strip(), f[1].strip(), parseTypeNameList(f[2], ','))]
-
-	return fcts
-
-def getEnumList(text):
-	enums = []
-
-	rx1 = re.compile(r'typedef\s+enum\s+([a-zA-Z0-9_]+)\s*\{(.*?)\}\s*([a-zA-Z0-9_]+)\s*;', re.MULTILINE | re.DOTALL)
-	rx2 = re.compile(r'enum\s+([a-zA-Z0-9_]+)\s*\{([^\}]+)\}\s*;', re.MULTILINE | re.DOTALL)
-	rx3 = re.compile(r'enum\s*\{([^\}]+)\}\s*;', re.MULTILINE | re.DOTALL)
-
-	for name, x, typedef in rx1.findall(text):
-		values = [u for u in map(lambda z: re.sub(r'\s*=\s*[0-9a-fA-Fx]*', '', z).strip(), x.split(',')) if u]
-		enums += [(name, values, typedef)]
-	for name, x          in rx2.findall(text):
-		values = [u for u in map(lambda z: re.sub(r'\s*=\s*[0-9a-fA-Fx]*', '', z).strip(), x.split(',')) if u]
-		enums += [(name, values, '')]
-	for x                in rx3.findall(text):
-		values = [u for u in map(lambda z: re.sub(r'\s*=\s*[0-9a-fA-Fx]*', '', z).strip(), x.split(',')) if u]
-		enums += [('', values, '')]
-
-	return enums
-
-def getDefinesList(text):
-	defines = []
+	# Remove comments and strealine broken lines
+	code = re.sub(re.compile(r'\\\s*\n'), '', \
+		re.sub(re.compile(r'\/\*.*?\*\/', re.MULTILINE | re.DOTALL), '', code))
 
 	rx = re.compile(r'#\s*define\s+([a-zA-Z_0-9]+)\s+([0-9a-fA-Fx\-]+)\s*\n')
-	for name, value in rx.findall(text):
-		defines += [(name, value)]
+	for name, value in rx.findall(code):
+		if name in ["TRUE", "FALSE"]:	# CRAPPY_COMPILER is not defined
+						# FIXME This is only necessary since we do not have a proper
+						# parser
+			continue
 
-	return defines
+		allPpDefs += [dict(zip(["name", "value"], [name, value]))]
 
-def md5sum(text):
-	x = hashlib.md5()
-	x.update(text)
+	return allPpDefs
 
-	return x.hexdigest()
+def parseCodeGetDecls(code):
+	allDecls = []
 
-def getStructsList(text):
-	structs = []
+	def addOneDecl(allDecls, d):
+		allDecls += [d]
+		return True	# Means: Ok, continue ...
 
-	rx1 = re.compile(r'typedef\s+struct\s+([a-zA-Z0-9_]*)\s*\{(.*?)\}\s*([a-zA-Z0-9_]+)\s*;', re.MULTILINE | re.DOTALL)
-	rx2 = re.compile(r'typedef\s+struct\s+([a-zA-Z0-9_]*)\s+([a-zA-Z0-9_]+)\s*;', re.MULTILINE | re.DOTALL)
+	callback = lambda d: addOneDecl(allDecls, d)
 
-	for name, x, typedef in rx1.findall(text):
-		if '' == name:
-			name = "anon" + md5sum(x)
+	toolArgs = ["-std=gnu11"]
+	for d in getAdditionalIncludePaths():
+		toolArgs += ["-I", d]
 
-		structs += [(name, parseTypeNameList(x, ';'), typedef)]
-	for name, typedef in rx2.findall(text):
-		if '' == name:
-			name = "anon" + md5sum(x)
+	# Please note: The .h suffix is important
+	success = plugin.iterateAST(code, "slurm.h", toolArgs, callback)
+	if not success:
+		sys.stderr.write("plugin.iterateAST failed.\n")
+		sys.exit(1)
 
-		found = False
-		for i, (other1, other2, other3) in enumerate(structs):
-			if other1 == name:
-				found = True
-				if '' == other3:
-					structs[i] = (other1, other2, other3)
-				else:
-					print("FIXME")
-					print((name, typedef), (other1, other2, other3))
+	# throwAwayDecls = filter(lambda z: not z["isInMainFile"], allDecls)
+	# for decl in throwAwayDecls:
+	# 	print(decl)
 
-		if not found:
-			structs += [(name, [], typedef)]
+	return filter(lambda z: z["isInMainFile"], allDecls)
 
-	return structs
+def extractEnums(allDecls):
+	return [{"name": enumDecl["name"], "members": [x["name"] for x in enumDecl["enumerators"]]} \
+			for enumDecl in filter(lambda z: "EnumDecl" == z["class"], allDecls)]
 
-text = ""
-for f in sys.argv[1:-1]:
-	text += open(f, "r").read()
+def findTypedefForStruct(typedefDecls, structDecl):
+	alias = None
 
-# Get rid of comments
-text = re.sub(re.compile(r'\/\*.*?\*\/', re.MULTILINE | re.DOTALL), '', text)
-# Undo explicit line break
-text = re.sub(re.compile(r'\\\s*\n'), '', text)
-# Streamline whitespcea
-text = re.sub(re.compile(r'[ \t\r\f\v]'), ' ', text)
+	if "addressTypedefForAnonDecl" in structDecl.keys():
+		alias = next(u for u in typedefDecls if u["address"] == structDecl["addressTypedefForAnonDecl"])
+	else:
+		tmp = [u for u in typedefDecls if u["underlyingType"] == "struct %s" % structDecl["name"]]
+		if 1 == len(tmp):
+			alias = tmp[0]
 
+	return alias
 
-api = {"enums": [], "defines": [], "structs": [], "functions": []}
+def extractStructs(allDecls):
+	structDecls  = filter(lambda z:  "RecordDecl" == z["class"], allDecls)
+	typedefDecls = filter(lambda z: "TypedefDecl" == z["class"], allDecls)
 
-for e in getEnumList(text):
-	d = {"name": e[0], "members": e[1]}
-	if len(e[2]) > 0:
-		d["typedef"] = e[2]
+	structList = []
+	for structDecl in structDecls:
+		d = {"name": structDecl["name"], "members": structDecl["fields"]}
 
-	api["enums"] += [d]
+		alias = findTypedefForStruct(typedefDecls, structDecl)
+		if alias:
+			d["typedef"] = alias["name"]
 
-for d in getDefinesList(text):
-	d = {"name": d[0], "value": d[1]}
+		structList += [d]
 
-	api["defines"] += [d]
+	return structList
 
-for s in getStructsList(text):
-	d = {"name": s[0], "members": [], "typedef": s[2]}
-	for t, n in s[1]:
-		d["members"] += [{"type": t, "name": n}]
+def extractFunctions(allDecls):
+	return [{"name": funcDecl["name"], "retVal": funcDecl["returnType"], "args": funcDecl["parameters"]} \
+			for funcDecl in filter(lambda z:  "FunctionDecl" == z["class"], allDecls)]
 
-	api["structs"] += [d]
+if __name__ == "__main__":
+	if len(sys.argv) < 3:
+		sys.stderr.write("usage: script inFile inFile ... inFile outFile\n")
+		sys.exit(1)
 
-for f in getFunctionList(text):
-	d = {"name": f[1], "retVal": f[0], "args": []}
-	for t, n in f[2]:
-		d["args"] += [{"type": t, "name": n}]
+	outFile  = sys.argv[-1]
+	fileList = sys.argv[1:-1]
 
-	api["functions"] += [d]
+	code     = readInCode(fileList)
+	allDecls = parseCodeGetDecls(code)
 
-with open(sys.argv[-1], "w") as f:
-	f.write(json.dumps(api))
+	api = {"enums"    : extractEnums(allDecls), \
+	       "defines"  : parseCodeGetPpDefs(code), \
+	       "structs"  : extractStructs(allDecls), \
+	       "functions": extractFunctions(allDecls)}
+
+	with open(sys.argv[-1], "w") as f:
+		f.write(json.dumps(api))
 
