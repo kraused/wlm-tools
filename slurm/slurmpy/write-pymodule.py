@@ -5,8 +5,84 @@ import re
 import json
 import StringIO
 
+commonIncludes = """
+#include <python2.7/Python.h>
+#include <python2.7/structmember.h>
+
+#include <slurm/slurm_errno.h>
+#include <slurm/slurm.h>
+#include <slurm/slurmdb.h>
+
+#include "common.h"
+"""
+
 
 api = json.loads(open(sys.argv[1], "r").read())
+
+
+def handlePreprocessorMacros(api):
+	header = StringIO.StringIO()
+	unit   = StringIO.StringIO()
+
+	header.write("""
+void addAllPreprocessorMacros(PyObject *module);
+
+""")
+
+	lines = ["\tPyModule_AddIntConstant(module, \"%s\", %s);" % tuple([x["name"]]*2) for x in api["defines"]]
+	body  = "\n".join(lines)
+
+	unit.write(commonIncludes)
+	unit.write("""
+#include "slurmpy-macros.h"
+
+void addAllPreprocessorMacros(PyObject *module)
+{
+%s
+}
+
+""" % body)
+
+	for name, ioInstance in zip(["slurmpy-macros.%s" % x for x in ["h", "c"]], [header, unit]):
+		with open(name, "w") as f:
+			f.write(ioInstance.getvalue())
+
+def handleEnums(api):
+	header = StringIO.StringIO()
+	unit   = StringIO.StringIO()
+
+	header.write("""
+void addAllEnumerators(PyObject *module);
+
+""")
+
+	allDecls = api["allDecls"]
+
+	lines = []
+	for enumDecl in filter(lambda z: "EnumDecl" == z["class"], allDecls):
+		comment = ""
+		if len(enumDecl["name"]) > 0:
+			comment = " /* %s */" % enumDecl["name"]
+
+		lines += ["\tPyModule_AddIntConstant(module, \"%s\", %s);%s" % (tuple([x["name"]]*2) + (comment,)) for x in enumDecl["enumerators"]]
+
+	body  = "\n".join(lines)
+
+	unit.write(commonIncludes)
+	unit.write("""
+#include "slurmpy-enums.h"
+
+void addAllEnumerators(PyObject *module)
+{
+%s
+}
+
+""" % body)
+
+	for name, ioInstance in zip(["slurmpy-enums.%s" % x for x in ["h", "c"]], [header, unit]):
+		with open(name, "w") as f:
+			f.write(ioInstance.getvalue())
+
 
 # Use StringIO here instead of a real file so that the output file is only
 # created at the very end when everything went fine. That makes sure that
@@ -20,6 +96,9 @@ f.write("""
 #include <slurm/slurm_errno.h>
 #include <slurm/slurm.h>
 #include <slurm/slurmdb.h>
+
+#include "slurmpy-macros.h"
+#include "slurmpy-enums.h"
 
 void slurm_verbose(const char *fmt, ...)
 {
@@ -1154,13 +1233,13 @@ for T in allWrapTypes:
 	}
 """ % (tuple([T.name + "_PyWrap_Type"]*3) + (T.name,) + tuple([T.name + "_PyWrap_Type"]*1)))
 
-f.write("\n\t/* enums */\n")
-for d in api["enums"]:
-	for x in d["members"]:
-		f.write("\tPyModule_AddIntConstant(slurmpyModule, \"%s\", %s); /* %s */\n" % (tuple([x]*2) + (d["name"],)))
-f.write("\n\t/* pp defines */\n")
-for d in api["defines"]:
-	f.write("\tPyModule_AddIntConstant(slurmpyModule, \"%s\", %s);\n" % tuple([d["name"]]*2))
+handlePreprocessorMacros(api)
+handleEnums(api)
+
+f.write("""
+	addAllPreprocessorMacros(slurmpyModule);
+	addAllEnumerators(slurmpyModule);
+""")
 
 f.write("""
 	setSlurmpyErrno(0);

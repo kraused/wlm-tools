@@ -68,10 +68,6 @@ def parseCodeGetDecls(code):
 
 	return filter(lambda z: z["isInMainFile"], allDecls)
 
-def extractEnums(allDecls):
-	return [{"name": enumDecl["name"], "members": [x["name"] for x in enumDecl["enumerators"]]} \
-			for enumDecl in filter(lambda z: "EnumDecl" == z["class"], allDecls)]
-
 def findTypedefForStruct(typedefDecls, structDecl):
 	alias = None
 
@@ -115,10 +111,10 @@ if __name__ == "__main__":
 	code     = readInCode(fileList)
 	allDecls = parseCodeGetDecls(code)
 
-	api = {"enums"    : extractEnums(allDecls), \
-	       "defines"  : parseCodeGetPpDefs(code), \
+	api = {"defines"  : parseCodeGetPpDefs(code), \
 	       "structs"  : extractStructs(allDecls), \
-	       "functions": extractFunctions(allDecls)}
+	       "functions": extractFunctions(allDecls), \
+	       "allDecls" : allDecls}
 
 	with open(sys.argv[-1], "w") as f:
 		f.write(json.dumps(api))
