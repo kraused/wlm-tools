@@ -1112,6 +1112,8 @@ static void setSlurmpyErrno(int errorNum)
 	functionBlacklist += [re.compile(r'slurmdb_accounts_add', 0), re.compile(r'slurmdb_accounts_get', 0), re.compile(r'slurmdb_accounts_modify', 0), re.compile(r'slurmdb_accounts_remove', 0), re.compile(r'slurmdb_archive', 0), re.compile(r'slurmdb_archive_load', 0), re.compile(r'slurmdb_associations_add', 0), re.compile(r'slurmdb_associations_get', 0), re.compile(r'slurmdb_associations_modify', 0), re.compile(r'slurmdb_associations_remove', 0), re.compile(r'slurmdb_clusters_add', 0), re.compile(r'slurmdb_clusters_get', 0), re.compile(r'slurmdb_clusters_modify', 0), re.compile(r'slurmdb_clusters_remove', 0), re.compile(r'slurmdb_report_cluster_account_by_user', 0), re.compile(r'slurmdb_report_cluster_user_by_account', 0), re.compile(r'slurmdb_report_cluster_wckey_by_user', 0), re.compile(r'slurmdb_report_cluster_user_by_wckey', 0), re.compile(r'slurmdb_report_job_sizes_grouped_by_top_account', 0), re.compile(r'slurmdb_report_job_sizes_grouped_by_wckey', 0), re.compile(r'slurmdb_report_job_sizes_grouped_by_top_account_then_wckey', 0), re.compile(r'slurmdb_report_user_top_usage', 0), re.compile(r'slurmdb_coord_add', 0), re.compile(r'slurmdb_coord_remove', 0), re.compile(r'slurmdb_config_get', 0), re.compile(r'slurmdb_events_get', 0), re.compile(r'slurmdb_jobs_get', 0), re.compile(r'slurmdb_problems_get', 0), re.compile(r'slurmdb_reservations_get', 0), re.compile(r'slurmdb_txn_get', 0), re.compile(r'slurmdb_res_add', 0), re.compile(r'slurmdb_res_get', 0), re.compile(r'slurmdb_res_modify', 0), re.compile(r'slurmdb_res_remove', 0), re.compile(r'slurmdb_qos_add', 0), re.compile(r'slurmdb_qos_get', 0), re.compile(r'slurmdb_qos_modify', 0), re.compile(r'slurmdb_qos_remove', 0), re.compile(r'slurmdb_usage_get', 0), re.compile(r'slurmdb_usage_roll', 0), re.compile(r'slurmdb_users_add', 0), re.compile(r'slurmdb_users_get', 0), re.compile(r'slurmdb_users_modify', 0), re.compile(r'slurmdb_users_remove', 0), re.compile(r'slurmdb_wckeys_add', 0), re.compile(r'slurmdb_wckeys_get', 0), re.compile(r'slurmdb_wckeys_modify', 0), re.compile(r'slurmdb_wckeys_remove', 0)]
 
 	for d in api["functions"]:
+		funcDecl = next(u for u in allDecls if "FunctionDecl" == u["class"] and d["name"] == u["name"])
+
 		skip = False
 		for rx in functionBlacklist:
 			if rx.match(d["name"]):
@@ -1122,108 +1124,78 @@ static void setSlurmpyErrno(int errorNum)
 		allWrapFunctions += [(d["name"], "%s_PyWrap" % d["name"], "Wrapper around %s" % d["name"])]
 
 		f.write("""\
-	static PyObject *%s_PyWrap(PyObject *self, PyObject *args)
-	{
-	""" % d["name"])
+static PyObject *%s_PyWrap(PyObject *self, PyObject *args)
+{
+""" % d["name"])
 
 		f.write("""\t/* %s %s(%s); */\n""" % (d["retVal"], d["name"], ", ".join(["%s %s" % (x["type"], x["name"]) for x in d["args"]])))
 
 		if isSomeInt(d["retVal"]):
 			f.write("""\
-		long long retVal = 1;
-	""")
+	long long retVal = 1;
+""")
 		if isString(d["retVal"]):
 			f.write("""\
-		char *retVal = NULL;
-	""")
+	char *retVal = NULL;
+""")
 
 		isPointerPointer = lambda a: re.match(r'.*\*\s*\*$', a["type"])
 		isPointer        = lambda a: re.match(r'.*\*$', a["type"])
 
-		for i, a in enumerate(d["args"]):
-			if '?' == a["type"]:	# No support for variable argument calls yet
-				continue
+		if len(d["args"]) > 0:
+			f.write("""
+	%s;
+""" % (";\n\t".join(["PyObject *dummy%02d" % i for i in range(len(d["args"]))])))
 
-			name = a["name"]
-			if '' == name:
-				name = "arg%02d" % i
+		for i, a in enumerate(d["args"]):
+#			if '?' == a["type"]:	# No support for variable argument calls yet
+#				continue
+
+			name  = "arg%02d" % i
 
 			if isPointerPointer(a):
 				pyWrapType = getPyWrapType(re.sub(r'\s', '', a["type"])[:-2], True)
 
-				f.write("""\tstruct %s *a_%s = NULL;\n""" % (pyWrapType, name))
+				f.write("""\tstruct %s *%s = NULL;\n""" % (pyWrapType, name))
 			elif isPointer(a):
 				if isString(a["type"]):
-					f.write("""\tchar *a_%s;\n""" % (name,))
-					f.write("""\tPyObject *dummy_%s;\n""" % name)
+					f.write("""\tchar *%s;\n""" % (name,))
 				elif isPtrToKnownStruct(a["type"]):
 					pyWrapType = getPyWrapType(re.sub(r'\s', '', a["type"])[:-1], False)
 
-					f.write("""\tstruct %s *a_%s;\n""" % (pyWrapType, name))
+					f.write("""\tstruct %s *%s;\n""" % (pyWrapType, name))
 				elif re.match(r'FILE\s*\*', a["type"]):
-					f.write("""\tFILE *a_%s;\n""" % (name,))
-					f.write("""\tPyObject *dummy_%s;\n""" % name)
+					f.write("""\tFILE *%s;\n""" % (name,))
 				else:
 					sys.stderr.write("How do I handle argument %s?\n" % str(a))
 			else:
-				f.write("""\t%s a_%s;\n""" % (a["type"], name))
-				if isSomeInt(a["type"]) or a["type"] in ['time_t', 'bool', 'uid_t']:
-					f.write("""\tlong long dummy_%s;\n""" % name)
-				else:
-					sys.stderr.write("How do I handle argument %s?\n" % str(a))
+				f.write("""\t%s %s;\n""" % (a["type"], name))
 
-		xxx = []
-		zzz = []
-		for i, a in enumerate(d["args"]):
-			if '?' == a["type"]:	# No support for variable argument calls yet
-				continue
-
-			name = a["name"]
-			if '' == name:
-				name = "arg%02d" % i
-
-			if isPointerPointer(a):
-				xxx += ["O"]
-				zzz += ["(PyObject *)&a_%s" % name]	# FIXME Totally unsafe!!!
-				pass
-			elif isPointer(a):
-				if isString(a["type"]):
-					xxx += ["S"]
-					zzz += ["&dummy_%s" % name]
-				elif isPtrToKnownStruct(a["type"]):
-					xxx += ["O"]
-					zzz += ["(PyObject *)&a_%s" % name]
-				elif re.match(r'FILE\s*\*', a["type"]):
-					xxx += ["O"]
-					zzz += ["&dummy_%s" % name]
-				else:
-					sys.stderr.write("How do I handle argument %s?\n" % str(a))
-			else:
-				if isSomeInt(a["type"]) or a["type"] in ['time_t', 'bool', 'uid_t']:
-					xxx += ["L"]
-					zzz += ["&dummy_%s" % name]
-				else:
-					sys.stderr.write("How do I handle argument %s?\n" % str(a))
-
-		if len(xxx) > 0:
+		if len(d["args"]) > 0:
 			f.write("""
-		if (!PyArg_ParseTuple(args, "%s", %s)) {
-			Py_RETURN_NONE;
-		}
-
-	""" % ("".join(xxx), ", ".join(zzz)))
+	if (!PyArg_UnpackTuple(args, "%s", %d, %d, %s)) {
+		/* FIXME */
+		Py_RETURN_NONE;
+	}
+""" % ((d["name"],) + tuple([len(d["args"])]*2) + (", ".join(["&dummy%02d" % i for i in range(len(d["args"]))]),)))
 
 		for i, a in enumerate(d["args"]):
-			if '?' == a["type"]:	# No support for variable argument calls yet
-				continue
-
-			name = a["name"]
-			if '' == name:
-				name = "arg%02d" % i
+			name  = "arg%02d" % i
+			dummy = "dummy%02d" % i
 
 			if isPointerPointer(a):
-				f.write("""\ta_%s->objpp = &a_%s->objp;\n""" % (name, name))
+				pyWrapType = getPyWrapType(re.sub(r'\s', '', a["type"])[:-2], True)
 
+				f.write("""
+	if (!PyObject_IsInstance(%s, (PyObject *)&%s_Type)) {
+		/* FIXME */
+		Py_RETURN_NONE;
+	}
+	%s = (struct %s*)%s;
+	%s->objpp = &%s->objp;
+""" % (dummy, pyWrapType, name, pyWrapType, dummy, name, name))
+
+# FIXME The free function should be set at creation time, right?
 				# Try to figure out if we have a free function in the API
 				q = re.sub(r'_t.*', '', a["type"])
 				for z in api["functions"]:
@@ -1234,69 +1206,93 @@ static void setSlurmpyErrno(int errorNum)
 					if ("submit_response_msg" == q and "slurm_free_submit_response_response_msg" == z["name"]) or \
 					   re.match(r'.*free_%s.*' % q, z["name"]) or \
 					   re.match(r'.*%s_free.*' % q, z["name"]):
-						f.write("""\ta_%s->freeCb = %s;\n""" % (name, z["name"]))
+						f.write("""\t%s->freeCb = %s;\n""" % (name, z["name"]))
 						break
 			elif isPointer(a):
 				if isString(a["type"]):
-					f.write("""\ta_%s = PyString_AsString(dummy_%s);\n""" % (name, name))
+					f.write("""
+	if (!PyString_Check(%s)) {
+		/* FIXME */
+		Py_RETURN_NONE;
+	}
+	%s = PyString_AsString(%s);
+""" % (dummy, name, dummy))
 				elif isPtrToKnownStruct(a["type"]):
-					pass
+					pyWrapType = getPyWrapType(re.sub(r'\s', '', a["type"])[:-1], False)
+					f.write("""
+	if (!PyObject_IsInstance(%s, (PyObject *)&%s_Type)) {
+		/* FIXME */
+		Py_RETURN_NONE;
+	}
+	%s = (struct %s*)%s;
+""" % (dummy, pyWrapType, name, pyWrapType, dummy))
 				elif re.match(r'FILE\s*\*', a["type"]):
 					f.write("""\
-		if (!PyFile_Check((PyObject *)dummy_%s)) {
-			fprintf(stderr, "Argument is not a file.\\n");
-			Py_RETURN_NONE;
-		}
-
-		a_%s = PyFile_AsFile(dummy_%s);
-		PyFile_IncUseCount((PyFileObject *)dummy_%s);
-	""" % tuple([name]*4))
+	if (!PyFile_Check((PyObject *)%s)) {
+		fprintf(stderr, "Argument is not a file.\\n");
+		Py_RETURN_NONE;
+	}
+	%s = PyFile_AsFile(%s);
+	PyFile_IncUseCount((PyFileObject *)%s);
+""" % (dummy, name, dummy, dummy))
 				else:
 					sys.stderr.write("How do I handle argument %s?\n" % str(a))
 			else:
 				if isSomeInt(a["type"]) or a["type"] in ['time_t', 'bool', 'uid_t']:
-					f.write("""\ta_%s = dummy_%s;\n""" % (name, name))
+					f.write("""
+	if (!PyInt_Check(%s)) {
+		/* FIXME */
+		Py_RETURN_NONE;
+	}
+	%s = PyInt_AsLong(%s);
+""" % (dummy, name, dummy))
+				elif isBool(a["type"]):
+					f.write("""
+	if (!PyBool_Check(%s)) {
+		/* FIXME */
+		Py_RETURN_NONE;
+	}
+	%s = 0;
+	if (Py_True == %s) {
+		%s = 1;
+	}
+""" % (dummy, name, dummy, name))
 				else:
 					sys.stderr.write("How do I handle argument %s?\n" % str(a))
 
-		xxx = "\t"
+		retValAssignment = ""
 		if "void" == d["retVal"]:
 			pass
 		elif isSomeInt(d["retVal"]) or isString(d["retVal"]):
-			xxx += "retVal = "
+			retValAssignment = "retVal = "
 		else:
 			sys.stderr.write("Return value %s is not handled properly.\n" % d["retVal"])
 
-		zzz = []
+		functionArgs = []
 		for i, a in enumerate(d["args"]):
-			if '?' == a["type"]:	# No support for variable argument calls yet
-				continue
+			name = "arg%02d" % i
 
-			name = a["name"]
-			if '' == name:
-				name = "arg%02d" % i
-
+			before = ""
+			after  = ""
 			if isPointerPointer(a):
-				zzz += ["&a_%s->objp" % name]
+				before = "&("
+				after  = "->objp)"
 			else:
 				if isPtrToKnownStruct(a["type"]):
-					zzz += ["a_%s->objp" % name]
-				else:
-					zzz += ["a_%s" % name]
+					before = "("
+					after  = "->objp)"
 
-		f.write("""errno = 0;\n""")
-		f.write("%s%s(%s);\n" % (xxx, d["name"], ", ".join(zzz)))
+			functionArgs += ["%s%s%s" % (before, name, after)]
+
 		f.write("""
-		setSlurmpyErrno(errno);
-	""")
+	errno = 0;
+	%s%s(%s);
+	setSlurmpyErrno(errno);
+""" % (retValAssignment, d["name"], ", ".join(functionArgs)))
 
 		for i, a in enumerate(d["args"]):
-			if '?' == a["type"]:	# No support for variable argument calls yet
-				continue
-
-			name = a["name"]
-			if '' == name:
-				name = "arg%02d" % i
+			name  = "arg%02d" % i
+			dummy = "dummy%02d" % i
 
 			if isPointerPointer(a):
 				pass
@@ -1307,8 +1303,8 @@ static void setSlurmpyErrno(int errorNum)
 					pass
 				elif re.match(r'FILE\s*\*', a["type"]):
 					f.write("""
-		PyFile_DecUseCount((PyFileObject *)dummy_%s);
-	""" % tuple([name]*1))
+	PyFile_DecUseCount((PyFileObject *)%s);
+""" % (dummy,))
 				else:
 					sys.stderr.write("How do I handle argument %s?\n" % str(a))
 			else:
@@ -1319,69 +1315,64 @@ static void setSlurmpyErrno(int errorNum)
 
 		if "void" == d["retVal"]:
 			f.write("""
-		Py_RETURN_NONE;
-	""")
+	Py_RETURN_NONE;
+""")
 		elif isSomeInt(d["retVal"]):
 			f.write("""
-		return Py_BuildValue("L", retVal);
-	""")
+	return Py_BuildValue("L", retVal);
+""")
 		elif isString(d["retVal"]):
 			f.write("""
-		return Py_BuildValue("s", retVal);
-	""")
+	return Py_BuildValue("s", retVal);
+""")
 		else:
 			sys.stderr.write("Return value %s is not handled properly.\n" % d["retVal"])
 			f.write("""
-		Py_RETURN_NONE;
-	""")
+	Py_RETURN_NONE;
+""")
 
 		f.write("""\
-	}
-	""")
+}
+""")
 
 	f.write("""
-	static PyMethodDef methods[] =
-	{
-	""")
-
-	for name, wrap, comment in allWrapFunctions:
-		f.write("\t{\"%s\", %s, METH_VARARGS, \"Wrapper around %s\"},\n" % (name, wrap, comment))
-
-	f.write("""\
-		{NULL, NULL, 0, NULL}
-	};
-	""")
+static PyMethodDef methods[] =
+{
+	%s,
+	{NULL, NULL, 0, NULL}
+};
+""" % (",\n\t".join(["{\"%s\", %s, METH_VARARGS, \"Wrapper around %s\"}" % (name, wrap, comment) for name, wrap, comment in allWrapFunctions])))
 
 	handleFunctions(api)
 
 	f.write("""
-	PyMODINIT_FUNC initslurmpy()
-	{
-		slurmpyModule = Py_InitModule("slurmpy", methods);
-	""")
+PyMODINIT_FUNC initslurmpy()
+{
+	slurmpyModule = Py_InitModule("slurmpy", methods);
+""")
 
 	f.write("\n\t/* structs */\n")
 	for T in allWrapTypes:
 		f.write("""
-		if (PyType_Ready(&%s) < 0) {
-			fprintf(stderr, "PyType_Ready() failed for %s.\\n");
-		} else {
-			Py_INCREF(&%s);
-			PyModule_AddObject(slurmpyModule, "%s", (PyObject *)&%s);
-		}
-	""" % (tuple([T.name + "_PyWrap_Type"]*3) + (T.name,) + tuple([T.name + "_PyWrap_Type"]*1)))
+	if (PyType_Ready(&%s) < 0) {
+		fprintf(stderr, "PyType_Ready() failed for %s.\\n");
+	} else {
+		Py_INCREF(&%s);
+		PyModule_AddObject(slurmpyModule, "%s", (PyObject *)&%s);
+	}
+""" % (tuple([T.name + "_PyWrap_Type"]*3) + (T.name,) + tuple([T.name + "_PyWrap_Type"]*1)))
 
 	handlePreprocessorMacros(api)
 	handleEnums(api)
 
 	f.write("""
-		addAllPreprocessorMacros(slurmpyModule);
-		addAllEnumerators(slurmpyModule);
-	""")
+	addAllPreprocessorMacros(slurmpyModule);
+	addAllEnumerators(slurmpyModule);
+""")
 
 	f.write("""
-		setSlurmpyErrno(0);
-	""")
+	setSlurmpyErrno(0);
+""")
 
 	# TODO Temporary mechanism. It is better to find the real type rather than just guessing the name.
 	for typedefDecl in filter(lambda z: "TypedefDecl" == z["class"] and 1 == z["isInMainFile"], allDecls):
@@ -1397,7 +1388,7 @@ static void setSlurmpyErrno(int errorNum)
 			f.write("""\tPyObject_SetAttrString(slurmpyModule, "%s", (PyObject *)&%s_Type);\n""" % (typedefDecl["name"], getPyWrapName(structDecl, False)))
 
 	f.write("""}
-	""")
+""")
 
 	with open(sys.argv[2], "w") as g:
 		g.write(f.getvalue())
