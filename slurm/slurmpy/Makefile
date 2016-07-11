@@ -5,7 +5,9 @@ CC       = /usr/bin/gcc
 CPPFLAGS = -I$(SLURM)/include -I$(HOME)/Python-2.7.11/include
 CCFLAGS  = -std=gnu99 -Wall -fPIC -O0 -ggdb
 CXX      = /usr/bin/g++
-CXXFLAGS = -Wall -fPIC -O0 -ggdb
+# By default clang and llvm are compiled without RTTI. Arch explicitly
+# enables RTTI when building clang but Fedora, for example, does not.
+CXXFLAGS = -std=c++11 -Wall -fPIC -O0 -ggdb -fno-rtti
 LD       = /usr/bin/gcc
 LDFLAGS  = -std=gnu99 -Wall -fPIC -O0 -ggdb -L$(SLURM)/lib/
 LIBS     = -lslurm -lslurmdb
@@ -41,10 +43,11 @@ slurmpy.so: slurmpy.o slurmpy-macros.o slurmpy-enums.o
 	$(CC) $(CPPFLAGS) $(CCFLAGS) -o $@ $^ -shared $(LDFLAGS) $(LIBS)
 
 clean:
-	/bin/rm api.json
-	/bin/rm slurmpy.c
-	/bin/rm slurmpy.o
-	/bin/rm slurmpy-*.c
-	/bin/rm slurmpy-*.o
-	/bin/rm slurmpy.so
+	-/bin/rm -f api.json
+	-/bin/rm -f plugin.so
+	-/bin/rm -f slurmpy.c
+	-/bin/rm -f slurmpy.o
+	-/bin/rm -f slurmpy-*.c
+	-/bin/rm -f slurmpy-*.o
+	-/bin/rm -f slurmpy.so
 

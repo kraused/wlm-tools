@@ -7,12 +7,30 @@ import subprocess
 
 import plugin
 
-def getAdditionalIncludePaths():
-	# Make sure clang finds stdbool and stddef
+# Get the absolute path of cc1 and try to guess the include path based on that. This works on my Arch
+# box but not on Fedora.
+def getIncludePathFromCc1():
 	p = subprocess.Popen(["/usr/bin/gcc", "--print-prog-name", "cc1"], stdout = subprocess.PIPE, stderr = subprocess.PIPE)
 	(o, e), x = p.communicate(), p.wait()
 
 	return [re.sub(r'cc1$', r'include', o.strip())]
+
+# Run cpp -Wp,-v and retrieve the search path from the stderr.
+def getIncludePathFromCpp():
+	p = subprocess.Popen(["/usr/bin/cpp", "-Wp,-v"], stdin = subprocess.PIPE, stdout = subprocess.PIPE, stderr = subprocess.PIPE)
+	(o, e), x = p.communicate(""), p.wait()
+
+	lines = [x for x in map(lambda u: u.strip(), e.split("\n")) if len(x) > 0]
+	print(lines)
+
+	i0 = next(i for i, line in enumerate(lines) if "#include <...> search starts here:" == line)
+	i1 = next(i for i, line in enumerate(lines) if "End of search list." == line)
+
+	return lines[i0:i1]
+
+def getAdditionalIncludePaths():
+	# Make sure clang finds stdbool and stddef
+	return getIncludePathFromCc1() + getIncludePathFromCpp()
 
 def readInCode(fileList):
 	code = ""
